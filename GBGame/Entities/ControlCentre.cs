@@ -12,8 +12,10 @@ using System.Collections.Generic;
 
 namespace GBGame.Entities;
 
-public class ControlCentre(Game windowData, InGame game, int zIndex = -1) : Entity(windowData, zIndex)
+public class ControlCentre(Game windowData, InGame game, ControlBindings controlBindings, int zIndex = -1) : Entity(windowData, zIndex)
 {
+    public required GridManager GridManager { private get; init; }
+
     private bool _picking = false;
     private bool _canPick = false;
 
@@ -48,22 +50,14 @@ public class ControlCentre(Game windowData, InGame game, int zIndex = -1) : Enti
     private List<Skill> _skills = [];
     private ButtonController _controller = new ButtonController(true);
 
+    public required WindowOptions GameWindowOptions { private get; init; }
+
     private TextButton CreateButton(Skill skill, bool first)
     {
         Vector2 measurements = _font.MeasureString(skill.Name);
-        Vector2 position = new Vector2(
-            (_window.GameSize.X - measurements.X) / 2,
-            (_window.GameSize.Y - measurements.Y) / 2
-        );
+        Vector2 position = (GameWindowOptions.RenderBounds.Size.ToVector2() - measurements) / 2;
 
-        if (first)
-        {
-            position.Y -= 3;
-        }
-        else
-        {
-            position.Y += 6;
-        }
+        position.Y = first ? position.Y - 3 : position.Y + 6;
 
         TextButton btn = new TextButton(_font, skill.Name, position, _textColour);
         btn.OnClick = () => {
@@ -120,19 +114,20 @@ public class ControlCentre(Game windowData, InGame game, int zIndex = -1) : Enti
         _controller.Add(_returnButton);
     }
 
+    public required MultiplyXP MultiplyXP { private get; init; }
+
     public override void LoadContent()
     {
         _window = (GameWindow)WindowData;
         _overlay = new Texture2D(_window.GraphicsDevice, 1, 1);
         _overlay.SetData(new[] { _overlayColour });
-        _size = new Rectangle(0, 0, (int)_window.GameSize.X, (int)_window.GameSize.Y);
 
         _sprite = WindowData.Content.Load<Texture2D>("Sprites/Objects/CommandCentre");
         _questionSprite = WindowData.Content.Load<Texture2D>("Sprites/Objects/CommandCentre_Interact");
 
         Position = new Vector2(
             0,
-            game.GroundLine - 12
+            GridManager.GroundLine - 12
         );
 
         Components.AddComponent(new RectCollider("Centre"));
@@ -143,20 +138,18 @@ public class ControlCentre(Game windowData, InGame game, int zIndex = -1) : Enti
 
         _font = WindowData.Content.Load<SpriteFont>("Sprites/Fonts/File");
 
-        Vector2 noSP = _font.MeasureString(_noSP);
-        _noSPMeasuremets = new Vector2((_window.GameSize.X - noSP.X) / 2, (_window.GameSize.Y - noSP.Y) / 2);
+        _noSPMeasuremets = (GameWindowOptions.RenderBounds.Size.ToVector2() - _font.MeasureString(_noSP)) / 2;
 
         Vector2 ret = _font.MeasureString(_return);
-        _returnMeasurements = new Vector2((_window.GameSize.X - ret.X) / 2, _window.GameSize.Y - ret.Y - 1);
+        _returnMeasurements = new Vector2((GameWindowOptions.RenderBounds.Width - ret.X) / 2, GameWindowOptions.RenderBounds.Height - ret.Y - 1);
 
-        _controller.SetControllerButtons(GBGame.ControllerInventoryUp, GBGame.ControllerInventoryDown, GBGame.ControllerAction);
-        _controller.SetKeyboardButtons(GBGame.KeyboardInventoryUp, GBGame.KeyboardInventoryDown, GBGame.KeyboardAction);
+        _controller.SetControllerButtons(controlBindings.ControllerInventoryUp, controlBindings.ControllerInventoryDown, controlBindings.ControllerAction);
+        _controller.SetKeyboardButtons(controlBindings.KeyboardInventoryUp, controlBindings.KeyboardInventoryDown, controlBindings.KeyboardAction);
 
-        _skills = [
-            new DoubleJump(game.Controller.GetFirst<Player>()!),
-            new MultiplyXP(_window),
-            new MoreHP(game.Controller.GetFirst<Player>()!)
-        ];
+        _skills = [ 
+            new DoubleJump(game.Controller.GetFirst<Player>()!), 
+            MultiplyXP, 
+            new MoreHP(game.Controller.GetFirst<Player>()!) ];
 
         _controller.OnActiveUpdating = (btn) => {
             btn.Colour = _textColour;
@@ -175,7 +168,7 @@ public class ControlCentre(Game windowData, InGame game, int zIndex = -1) : Enti
 
             if (Interacting && SkillPoints == 0)
             { 
-                if (InputManager.IsGamePadPressed(GBGame.ControllerAction) || InputManager.IsKeyPressed(GBGame.KeyboardAction))
+                if (InputManager.IsGamePadPressed(controlBindings.ControllerAction) || InputManager.IsKeyPressed(controlBindings.KeyboardAction))
                 {
                     Interacting = false;
                     game.SkipFrame = true;
@@ -183,19 +176,19 @@ public class ControlCentre(Game windowData, InGame game, int zIndex = -1) : Enti
                 }
             }
 
-            if ((InputManager.IsGamePadPressed(GBGame.ControllerAction) || InputManager.IsKeyPressed(GBGame.KeyboardAction)) && !Interacting)
+            if ((InputManager.IsGamePadPressed(controlBindings.ControllerAction) || InputManager.IsKeyPressed(controlBindings.KeyboardAction)) && !Interacting)
             {
                 Interacting = true;
 
-                if (SkillPoints > 0) _picking = true;
+                if (SkillPoints > 0) { _picking = true; }
             }
         }
         else
         {
-            if (_questionOpacity > 0) _questionOpacity -= 0.4f;
+            if (_questionOpacity > 0) { _questionOpacity -= 0.4f; }
         }
 
-        if (_picking && _canPick) _controller.Update(_window.MousePosition);
+        if (_picking && _canPick) { _controller.Update(_window.MousePosition); }
     }
   
     public override void Draw(SpriteBatch batch, GameTime time)

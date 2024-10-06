@@ -13,11 +13,18 @@ using GBGame.Entities.Enemies;
 using MonoGayme.Controllers;
 using MonoGayme.Components.Colliders;
 using MonoGayme.Entities;
+using System.Linq;
+using System.Collections.Immutable;
+using System.IO;
 
 namespace GBGame.States;
 
 public class InGame(GameWindow windowData) : State(windowData)
 {
+    public required ControlBindings ControlBindings { private get; init; }
+    public required InGameOptions InGameOptions {  private get; init; }
+    public required WindowOptions WindowOptions { private get; init; }
+
     public int ScoreMultiplier = 1;
 
     public bool SkipFrame = false;
@@ -25,28 +32,20 @@ public class InGame(GameWindow windowData) : State(windowData)
     const int BatSpawnerHeight = -8;
     const int BatSpawnerWidth = 40;
 
-    private record struct GroundTile(Texture2D Sprite, int X, int Y);
+    ImmutableArray<GridManager.GroundTile> groundTiles = [];
 
-    private List<Texture2D> _grass = [];
-    private List<Texture2D> _ground = [];
-    private List<GroundTile> _groundTiles = [];
-
-    private readonly int TileSize = 8;
     private readonly Color BackDrop = new Color(232, 240, 223);
 
-    private Camera2D _camera = new Camera2D(Vector2.Zero);
+    private Camera2D _camera = new(Vector2.Zero);
     private float _cameraOffset = 40;
 
-    public EntityController Controller = new EntityController();
-    private EntityController _enemyController = new EntityController();
-
-    public int GroundLine;
-    private int _gameWidth;
-
-    private Texture2D _island = null!;
+    public EntityController Controller = new();
+    private EntityController _enemyController = new();
 
     private Inventory _inventory = new Inventory();
-    private Pause _pause = null!;
+
+    public required Pause Pause { private get; init; }
+
     private AnimatedSpriteSheet _sheet = null!;
 
     public Bomb Bomb = null!;
@@ -60,62 +59,29 @@ public class InGame(GameWindow windowData) : State(windowData)
     private Shapes _shapes = null!;
 
     private bool _striking = false;
-    private RectCollider _strikeCollider = new RectCollider();
+    private RectCollider _strikeCollider = new();
 
     private Player _player = null!;
     private RectCollider _playerCollider = null!;
     private Jump _playerJump = null!;
 
-    private readonly Color _levelColour = new Color(176, 192, 160);
-    private readonly Color _xpColour = new Color(96, 112, 80);
-    private SpriteFont _font = null!;
+    private readonly Color _levelColour = new(176, 192, 160);
+    private readonly Color _xpColour = new(96, 112, 80);
 
-    private Texture2D _starSprite = null!;
+    private SpriteFont _font = windowData.Content.Load<SpriteFont>("Sprites/Fonts/File");
+    private Texture2D _island = windowData.Content.Load<Texture2D>("Sprites/BackGround/Island");
+    private Texture2D _starSprite = windowData.Content.Load<Texture2D>("Sprites/UI/LevelStar");
 
-    private Timer _batTimer = new Timer(5, true, false);
-
-    private Timer _difficultyTimer = new Timer(30, true, false);
+    private Timer _batTimer = new(5, true, false);
+    private Timer _difficultyTimer = new(30, true, false);
     private readonly float _maxDecrease = 3f;
     private bool _canTry = false;
     private bool _canSpawn = false;
 
-    private ControlCentre _centre = null!;
     private RectCollider _centreCollider = null!;
 
     private readonly int _baseXP = 14;
     private int _toLevelUp;
-
-    private void SetupGround(int tileCountX, int tileCountY)
-    { 
-        int basePosition = 0;
-        for (int i = 0; i < _gameWidth / TileSize; i++)
-        {
-            // Get a random ground tile
-            Texture2D tile = _ground[Random.Shared.Next(0, 3)]; // 0, 2 range
-            _groundTiles.Add(new GroundTile(tile, basePosition, tileCountY - TileSize));
-
-            // Add the plain ground below, so we get a set of 2.
-            _groundTiles.Add(new GroundTile(_ground[3], basePosition, tileCountY));
-
-            basePosition += TileSize;
-        }
-
-        int grassCount = Random.Shared.Next(5, 10);
-        HashSet<int> usedGridPositions = new HashSet<int>();
-        for (int i = 0; i < grassCount; i++) 
-        {
-            Texture2D tile = _grass[Random.Shared.Next(0, 2)];
-
-            // Get a random position on the grid
-            int gridX;
-            do gridX = Random.Shared.Next(0, tileCountX);
-            while (usedGridPositions.Contains(gridX));
-
-            usedGridPositions.Add(gridX);
-
-            _groundTiles.Add(new GroundTile(tile, gridX * TileSize, tileCountY - TileSize * 2));
-        }  
-    }
 
     private void ShakeCamera(GameTime time)
     { 
@@ -148,13 +114,13 @@ public class InGame(GameWindow windowData) : State(windowData)
 
     private void HandleInventoryInput()
     { 
-        if (InputManager.IsKeyPressed(GBGame.KeyboardInventoryUp) || InputManager.IsGamePadPressed(GBGame.ControllerInventoryUp))
+        if (InputManager.IsKeyPressed(ControlBindings.KeyboardInventoryUp) || InputManager.IsGamePadPressed(ControlBindings.ControllerInventoryUp))
             _inventory.ActiveItemIndex--;
 
-        if (InputManager.IsKeyPressed(GBGame.KeyboardInventoryDown) || InputManager.IsGamePadPressed(GBGame.ControllerInventoryDown))
+        if (InputManager.IsKeyPressed(ControlBindings.KeyboardInventoryDown) || InputManager.IsGamePadPressed(ControlBindings.ControllerInventoryDown))
             _inventory.ActiveItemIndex++;
 
-        if (InputManager.IsKeyPressed(GBGame.KeyboardAction) || InputManager.IsGamePadPressed(GBGame.ControllerAction))
+        if (InputManager.IsKeyPressed(ControlBindings.KeyboardAction) || InputManager.IsGamePadPressed(ControlBindings.ControllerAction))
             _inventory.UseActive();
     }
 
@@ -183,7 +149,7 @@ public class InGame(GameWindow windowData) : State(windowData)
         if (dropper is null) return;
 
         GameWindow window = (GameWindow)WindowData;
-        _player.XP += dropper.XP * window.XPMultiplier;
+        _player.XP += dropper.XP * InGameOptions.XPMultiplier;
         if (_player.XP >= _toLevelUp)
         {
             _player.Level++;
@@ -196,52 +162,35 @@ public class InGame(GameWindow windowData) : State(windowData)
             // Double XP every level
             _toLevelUp *= 2;
 
-            _centre.SkillPoints++;
-            _centre.ChooseSkills();
+            window.ControlCentre.SkillPoints++;
+            window.ControlCentre.ChooseSkills();
         }
     }
+
+    public required GridManager GridManager { private get; init; }
 
     public override void LoadContent()
     {
         _toLevelUp = _baseXP;
-        _starSprite = WindowData.Content.Load<Texture2D>("Sprites/UI/LevelStar");
 
         _strikeCollider.Bounds = new Rectangle();
 
-        for (int i = 1; i <= 4; i++) 
-            _ground.Add(WindowData.Content.Load<Texture2D>($"Sprites/Ground/Ground_{i}"));
-        
-        for (int i = 1; i <= 2; i++)
-            _grass.Add(WindowData.Content.Load<Texture2D>($"Sprites/Grass/Grass_{i}"));
-
         GameWindow window = (GameWindow)WindowData;
 
-        _gameWidth = (int)(window.GameSize.Y * 2);
+        groundTiles = GridManager.GenerateTiles();
 
-        int tileCountY = (int)(window.GameSize.Y - TileSize);
-        int tileCountX = _gameWidth / TileSize; 
-        SetupGround(tileCountX, tileCountY);
-
-        // TileSize / 2 is the player width origin.
-        GroundLine = tileCountY - TileSize - TileSize / 2;
-
-        _player = new Player(WindowData, _camera);
-        _player.Position.Y = GroundLine;
+        _player = new Player(WindowData, ControlBindings, _camera);
+        this._player.Position.Y = GridManager.GroundLine;
         Controller.AddEntity(_player);
 
-        _centre = new ControlCentre(window, this);
-        _centre.LoadContent();
-        _centreCollider = _centre.Components.GetComponent<RectCollider>()!;
+        window.ControlCentre.LoadContent();
+        _centreCollider = window.ControlCentre.Components.GetComponent<RectCollider>()!;
 
         _playerCollider = _player.Components.GetComponent<RectCollider>()!;
         _playerJump = _player.Components.GetComponent<Jump>()!;
 
-        _island = WindowData.Content.Load<Texture2D>("Sprites/BackGround/Island");
-
         _sheet = new AnimatedSpriteSheet(WindowData.Content.Load<Texture2D>("Sprites/SpriteSheets/Strike"), new Vector2(6, 1), 0.02f);
-        _sheet.OnSheetFinished = () => { 
-            _striking = false;
-        };
+        _sheet.OnSheetFinished = () => _striking = false;
         
         _inventory.LoadContent(WindowData);
         _inventory.AddItem(new Sword(WindowData, _sheet, _player));
@@ -256,8 +205,6 @@ public class InGame(GameWindow windowData) : State(windowData)
             StartShake(1, 3);
             _shakeOffset = Vector2.Zero;
         };
-
-        _pause = new Pause(window);
 
         _enemyController.OnEntityUpdate = (device, time, entity) => {
             RectCollider? rect = entity.Components.GetComponent<RectCollider>("PlayerStriker");
@@ -350,7 +297,6 @@ public class InGame(GameWindow windowData) : State(windowData)
         };
 
         _shapes = new Shapes(window.GraphicsDevice);
-        _font = WindowData.Content.Load<SpriteFont>("Sprites/Fonts/File");
     }
 
     public override void Update(GameTime time)
@@ -361,48 +307,46 @@ public class InGame(GameWindow windowData) : State(windowData)
             return;
         }
 
-        if (!_centre.Interacting && (InputManager.IsGamePadPressed(Buttons.Start) || InputManager.IsKeyPressed(Keys.Escape)))
-            _pause.Paused = !_pause.Paused;
+        if (!windowData.ControlCentre.Interacting && (InputManager.IsGamePadPressed(Buttons.Start) || InputManager.IsKeyPressed(Keys.Escape)))
+            Pause.Paused = !Pause.Paused;
 
-        if (_pause.Paused)
+        if (Pause.Paused)
         {
-            _pause.Update();
+            Pause.Update();
             return;
         }
 
         // idek
-        _centre.CanInteract = _centreCollider.Collides(_playerCollider);
-        _centre.Update(time);
+        windowData.ControlCentre.CanInteract = _centreCollider.Collides(_playerCollider);
+        windowData.ControlCentre.Update(time);
 
-        if (_centre.Interacting) return;
+        if (windowData.ControlCentre.Interacting) { return; }
 
         // Update controllers.
         Controller.UpdateEntities(WindowData.GraphicsDevice, time);
         _enemyController.UpdateEntities(WindowData.GraphicsDevice, time);
 
         // Hardcoded ground checking (we don't need anything more complicated.)
-        if (_player.Position.Y > GroundLine) 
+        if (_player.Position.Y > GridManager.GroundLine) 
         {
             _player.Velocity.Y = 0;
-            _player.Position.Y = GroundLine;
+            _player.Position.Y = GridManager.GroundLine;
 
             _playerJump.Count = _playerJump.BaseCount;
 
             _player.IsOnFloor = true;
         }
 
-        if (_player.Position.Y < GroundLine && _player.IsOnFloor)
+        if (_player.Position.Y < GridManager.GroundLine && _player.IsOnFloor)
         {
             _player.IsOnFloor = false;
         }
 
         // Keep the camera position between the game sizes, so the _player doesn't see outside the map.
-        GameWindow window = (GameWindow)WindowData;
-        _camera.X = Math.Clamp(MathF.Floor(_player.Position.X - _cameraOffset + _shakeOffset.X), 0, _gameWidth - window.GameSize.X);
-        _camera.Y = _shakeOffset.Y; 
+        _camera.X = Math.Clamp(MathF.Floor(_player.Position.X - _cameraOffset + _shakeOffset.X), 0, WindowOptions.RenderBounds.Width - InGameOptions.FieldSize.Y);
+        _camera.Y = _shakeOffset.Y;
 
-        if (!SkipFrame)
-            HandleInventoryInput();
+        if (!SkipFrame){ HandleInventoryInput(); }
 
         if (!_sheet.Finished) _sheet.CycleAnimation(time);
         if (!Bomb.Sheet.Finished) Bomb.Sheet.CycleAnimation(time);
@@ -422,8 +366,8 @@ public class InGame(GameWindow windowData) : State(windowData)
             // Draw the background
             batch.Draw(_island, _camera.ScreenToWorld(new Vector2(0, -10)), Color.White * 0.4f);
 
-            foreach (GroundTile tile in _groundTiles) 
-                batch.Draw(tile.Sprite, new Vector2(tile.X, tile.Y), Color.White);
+            foreach (GridManager.GroundTile tile in this.groundTiles) 
+                batch.Draw(tile.Sprite, tile.Point.ToVector2(), Color.White);
 
             _enemyController.DrawEntities(batch, time);
             Controller.DrawEntities(batch, time); 
@@ -456,10 +400,74 @@ public class InGame(GameWindow windowData) : State(windowData)
             batch.Draw(_starSprite, _camera.ScreenToWorld(new Vector2(0, 34)), Color.White);
             batch.DrawString(_font, $"{_player.Level}", _camera.ScreenToWorld(new Vector2(10, 33)), _levelColour);
 
-            _centre.Draw(batch, time);
+            windowData.ControlCentre.Draw(batch, time);
 
-            if (_pause.Paused) _pause.Draw(batch, _camera);
+            if (Pause.Paused) Pause.Draw(batch, _camera);
         } 
         batch.End();
     }
+}
+
+public class GridManager(GameWindow game, InGameOptions inGameOptions)
+{
+    public record struct GroundTile(Texture2D Sprite, Point Point);
+
+    public int GroundLine { get; } = (int) (inGameOptions.FieldSize.Y - (inGameOptions.TileSize.Y * 2.5));
+
+    readonly ImmutableArray<Texture2D> groundTextures = game.LoadDirectory<Texture2D>("Sprites/Ground/").ToImmutableArray();
+    readonly ImmutableArray<Texture2D> grassTextures = game.LoadDirectory<Texture2D>("Sprites/Grass/").ToImmutableArray();
+
+    public ImmutableArray<GroundTile> GenerateTiles()
+    {
+        if (!this.groundTextures.ValidateSize(inGameOptions.TileSize) || !this.grassTextures.ValidateSize(inGameOptions.TileSize)) 
+        { 
+            throw new InvalidOperationException("Invalid Tile Size."); 
+        }
+
+        var (xCount, yCount) = int.DivRem(inGameOptions.FieldSize.X, inGameOptions.TileSize.X) is { Quotient: int xc, Remainder: 0 }
+                            && int.DivRem(inGameOptions.FieldSize.Y, inGameOptions.TileSize.Y) is { Quotient: int yc, Remainder: 0 }
+                            && yc >= inGameOptions.GroundTileRows ? (xc, int.Min(yc, inGameOptions.GroundTileRows)) 
+                            : throw new InvalidOperationException($"Tiles bounds must divide evenly into game field bounds.");
+
+        Point groundOffset = new(0, inGameOptions.FieldSize.Y - (inGameOptions.TileSize.Y * inGameOptions.GroundTileRows));
+
+        var surfaceTiles = from iteration in Enumerable.Range(0, xCount)
+                           let groundTexture = Random.Shared.Pick(this.groundTextures.AsSpan()[..^1])
+                           let groundX = groundOffset.X + (iteration * inGameOptions.TileSize.X)
+                           select new GroundTile(groundTexture, new(groundX, groundOffset.Y));
+
+        var undergroundTiles = from iterationX in Enumerable.Range(0, xCount)
+                               let undergroundX = groundOffset.X + (iterationX * inGameOptions.TileSize.X)
+                               from iterationY in Enumerable.Range(1, yCount - 1)
+                               let undergroundY = groundOffset.Y + (iterationY * inGameOptions.TileSize.Y)
+                               select new GroundTile(this.groundTextures[^1], new(undergroundX, undergroundY));
+
+        var grassTiles = from iteration in Enumerable.Range(0, Random.Shared.Next(xCount / 2, xCount))
+                         let grassX = Random.Shared.Next(0, xCount) * inGameOptions.TileSize.X
+                         let grassTexture = Random.Shared.Pick(this.grassTextures.AsSpan())
+                         select new GroundTile(grassTexture, new(grassX, groundOffset.Y - inGameOptions.TileSize.Y));
+
+        return [.. surfaceTiles, .. undergroundTiles, .. grassTiles.DistinctBy(tile => tile.Point.X)];
+    }
+}
+
+public static class RandomHelper
+{
+    public static T Pick<T>(this Random random, ReadOnlySpan<T> span) => span[random.Next(0, span.Length - 1)];
+}
+
+public static class GameHelper 
+{
+    public static IEnumerable<T> LoadDirectory<T>(this Game game, string subDirectory)
+    {
+        Directory.SetCurrentDirectory(game.Content.RootDirectory);        
+        IEnumerable<T> resources = Directory.EnumerateFiles(subDirectory).Select(path => path[..^4])
+                                            .Select(game.Content.Load<T>);
+        Directory.SetCurrentDirectory("../");
+        return resources;
+    }
+
+    public static bool ValidateSize(this IEnumerable<Texture2D> textures, Point expectedSize) 
+        => !textures.Any(textures => textures.Bounds.Size != expectedSize);
+
 }

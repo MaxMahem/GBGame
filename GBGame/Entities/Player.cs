@@ -10,7 +10,7 @@ using System.Collections.Generic;
 
 namespace GBGame.Entities;
 
-public class Player(Game windowData, Camera2D camera, int zIndex = 1) : Entity(windowData, zIndex)
+public class Player(Game windowData, ControlBindings controlBindings, Camera2D camera, int zIndex = 1) : Entity(windowData, zIndex)
 {
     private Texture2D _sprite = null!;
     private Vector2 _origin = Vector2.Zero;
@@ -118,12 +118,12 @@ public class Player(Game windowData, Camera2D camera, int zIndex = 1) : Entity(w
     {
         _immunityTimer.Cycle(time);
 
-        if (InputManager.IsKeyDown(GBGame.KeyboardLeft) || InputManager.IsGamePadDown(GBGame.ControllerLeft))
+        if (InputManager.IsKeyDown(controlBindings.KeyboardLeft) || InputManager.IsGamePadDown(controlBindings.ControllerLeft))
         {
             Velocity.X = MathUtility.MoveTowards(Velocity.X, -TerminalVelocity, Acceleration);
             FacingRight = false;
         } 
-        else if (InputManager.IsKeyDown(GBGame.KeyboardRight) || InputManager.IsGamePadDown(GBGame.ControllerRight))
+        else if (InputManager.IsKeyDown(controlBindings.KeyboardRight) || InputManager.IsGamePadDown(controlBindings.ControllerRight))
         {
             Velocity.X = MathUtility.MoveTowards(Velocity.X, TerminalVelocity, Acceleration);
             FacingRight = true;
@@ -133,13 +133,13 @@ public class Player(Game windowData, Camera2D camera, int zIndex = 1) : Entity(w
             Velocity.X = MathUtility.MoveTowards(Velocity.X, 0, Acceleration);
         }
 
-        if (IsOnFloor && (InputManager.IsKeyPressed(GBGame.KeyboardJump) || InputManager.IsGamePadPressed(GBGame.ControllerJump)))
+        if (IsOnFloor && (InputManager.IsKeyPressed(controlBindings.KeyboardJump) || InputManager.IsGamePadPressed(controlBindings.ControllerJump)))
         {
             Velocity.Y = -JumpVelocity;
             IsOnFloor = false;
         }
 
-        if (!IsOnFloor && _jump.Count > 0 && (InputManager.IsKeyPressed(GBGame.KeyboardJump) || InputManager.IsGamePadPressed(GBGame.ControllerJump)))
+        if (!IsOnFloor && _jump.Count > 0 && (InputManager.IsKeyPressed(controlBindings.KeyboardJump) || InputManager.IsGamePadPressed(controlBindings.ControllerJump)))
         {
             Velocity.Y = -JumpVelocity;
             _jump.Count--;

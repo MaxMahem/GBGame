@@ -12,9 +12,8 @@ public class Pause
     public bool Paused = false;
 
     private Texture2D _overlay;
-    private Rectangle _size;
-    private Color _overlayColour = new Color(40, 56, 24);
-    private Color _textColour = new Color(176, 192, 160);
+    private Color _overlayColour = new(40, 56, 24);
+    private Color _textColour = new(176, 192, 160);
 
     private Vector2 _titlePos;
 
@@ -25,41 +24,49 @@ public class Pause
 
     private ButtonController _controller = new ButtonController(true);
 
-    public Pause(GameWindow window)
+    public Pause(GameWindow window, WindowOptions windowOptions, ControlBindings controlBindings)
     {
         _overlay = new Texture2D(window.GraphicsDevice, 1, 1);
         _overlay.SetData(new[] { _overlayColour });
-        _size = new Rectangle(0, 0, (int)window.GameSize.X, (int)window.GameSize.Y);
 
         _fontBig = window.Content.Load<SpriteFont>("Sprites/Fonts/FontBig");
         _font = window.Content.Load<SpriteFont>("Sprites/Fonts/File");
 
         Vector2 titleSize = _fontBig.MeasureString("PAUSED");
         _titlePos = new Vector2(
-            (window.GameSize.X - titleSize.X) / 2,
+            (windowOptions.RenderBounds.Width - titleSize.X) / 2,
             10
         );
 
         _window = window;
 
-        TextButton resume = new TextButton(_font, "resume", new Vector2((window.GameSize.X - _font.MeasureString("resume").X) / 2, 40), _textColour) {
+        TextButton resume = new TextButton(_font, "resume", new Vector2((windowOptions.RenderBounds.Width - _font.MeasureString("resume").X) / 2, 40), _textColour) {
             OnClick = () => { 
                 Paused = !Paused;
             }
         };
 
-        TextButton mainMenu = new TextButton(_font, "main menu", new Vector2((window.GameSize.X - _font.MeasureString("main menu").X) / 2, 50), _textColour) {
+        TextButton mainMenu = new TextButton(_font, "main menu", new Vector2((windowOptions.RenderBounds.Width - _font.MeasureString("main menu").X) / 2, 50), _textColour) {
             OnClick = () => {
                 Console.WriteLine("Meow meow");
             }
         };
 
-        TextButton quit = new TextButton(_font, "quit game", new Vector2((window.GameSize.X - _font.MeasureString("quit game").X) / 2, 60), _textColour) {
+        TextButton quit = new TextButton(_font, "quit game", new Vector2((windowOptions.RenderBounds.Width - _font.MeasureString("quit game").X) / 2, 60), _textColour) {
             OnClick = window.Exit
         };
 
-        _controller.SetControllerButtons(GBGame.ControllerInventoryUp, GBGame.ControllerInventoryDown, GBGame.ControllerAction);
-        _controller.SetKeyboardButtons(GBGame.KeyboardInventoryUp, GBGame.KeyboardInventoryDown, GBGame.KeyboardAction);
+        _controller.SetControllerButtons(
+            controlBindings.ControllerInventoryUp, 
+            controlBindings.ControllerInventoryDown, 
+            controlBindings.ControllerAction
+        );
+        
+        _controller.SetKeyboardButtons(
+            controlBindings.KeyboardInventoryUp, 
+            controlBindings.KeyboardInventoryDown, 
+            controlBindings.KeyboardAction
+        );
 
         _controller.OnActiveUpdating = (btn) => {
             btn.Colour = _textColour;
@@ -81,11 +88,7 @@ public class Pause
 
     public void Draw(SpriteBatch batch, Camera2D camera)
     {
-        Vector2 relative = camera.ScreenToWorld(Vector2.Zero);
-        _size.X = (int)relative.X;
-        _size.Y = (int)relative.Y;
-
-        batch.Draw(_overlay, _size, Color.White * 0.6f);
+        batch.Draw(_overlay, camera.ScreenToWorld(Vector2.Zero), Color.White * 0.6f);
 
         batch.DrawString(_fontBig, "PAUSED", camera.ScreenToWorld(_titlePos), _textColour);
 

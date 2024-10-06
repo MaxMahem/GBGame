@@ -2,16 +2,9 @@
 
 public class MultiplyXP : Skill
 {
-    private readonly GameWindow _window;
+    public required InGameOptions GameOptions { private get; set; }
 
-    public MultiplyXP(GameWindow window)
-    {
-        Name = "More XP";
-        _window = window;
-    }
+    public MultiplyXP() { Name = "More XP"; }
 
-    public override void OnActivate()
-    {
-        _window.XPMultiplier *= 2;
-    }
+    public override void OnActivate() => GameOptions.XPMultiplier *= 2;
 }
