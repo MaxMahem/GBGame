@@ -1,4 +1,5 @@
 using GBGame.Components;
+using GBGame.States;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using MonoGayme.Components;
@@ -10,18 +11,31 @@ using System.Collections.Generic;
 
 namespace GBGame.Entities;
 
-public class Player(Game windowData, ControlBindings controlBindings, Camera2D camera, int zIndex = 1) : Entity(windowData, zIndex)
+public class PlayerOptions
 {
+    public int ZIndex { get; set; } = 1;
+
+    public float TerminalVelocity { get; set; } = 2f;
+    public float Acceleration { get; set; } = 0.5f;
+    public float JumpVelocity { get; set; } = 6f;
+
+    public int BaseXP { get; set; } = 14;
+    public int BaseXPMultiplier { get; set; } = 1;
+}
+
+public class Player(Game windowData, ControlBindings controlBindings, CameraGB camera, PlayerOptions playerOptions) 
+    : Entity(windowData, playerOptions.ZIndex)
+{
+    public int SkillPoints { get; set; } = 0;
+    public int ToLevelUp { get; set; } = playerOptions.BaseXP;
+
+    public int XPMultiplier { get; set; } = playerOptions.BaseXPMultiplier;
+
     private Texture2D _sprite = null!;
     private Vector2 _origin = Vector2.Zero;
 
-    private readonly float TerminalVelocity = 2f;
-    private readonly float Acceleration = 0.5f;
-
     public bool IsOnFloor = false;
     public bool FacingRight = true;
-
-    public readonly float JumpVelocity = 6f;
 
     public RectCollider Collider = null!;
     private Timer _immunityTimer = null!;
@@ -80,6 +94,22 @@ public class Player(Game windowData, ControlBindings controlBindings, Camera2D c
         _basePosition += 17;
     }
 
+    public void CalculateXP(Entity entity)
+    {
+        XPDropper? dropper = entity.Components.GetComponent<XPDropper>();
+        if (dropper is null) { return; }
+
+        this.XP += dropper.XP * XPMultiplier;
+        if (this.XP >= ToLevelUp) {
+            this.Level++;
+
+            this.XP = int.Min(0, this.XP - ToLevelUp);
+
+            ToLevelUp *= 2;
+            SkillPoints++;
+        }
+    }
+
     public override void LoadContent()
     {
         Position.X = 40;
@@ -95,9 +125,7 @@ public class Player(Game windowData, ControlBindings controlBindings, Camera2D c
 
         Components.AddComponent(new Timer(1, false, true, "ImmunityTimer"));
         _immunityTimer = Components.GetComponent<Timer>()!;
-        _immunityTimer.OnTimeOut = () => {
-            Collider.Enabled = true;
-        };
+        _immunityTimer.OnTimeOut = () => Collider.Enabled = true;
 
         Components.AddComponent(new Health(3));
         Health = Components.GetComponent<Health>()!;
@@ -120,34 +148,34 @@ public class Player(Game windowData, ControlBindings controlBindings, Camera2D c
 
         if (InputManager.IsKeyDown(controlBindings.KeyboardLeft) || InputManager.IsGamePadDown(controlBindings.ControllerLeft))
         {
-            Velocity.X = MathUtility.MoveTowards(Velocity.X, -TerminalVelocity, Acceleration);
+            Velocity.X = MathUtility.MoveTowards(Velocity.X, -playerOptions.TerminalVelocity, playerOptions.Acceleration);
             FacingRight = false;
         } 
         else if (InputManager.IsKeyDown(controlBindings.KeyboardRight) || InputManager.IsGamePadDown(controlBindings.ControllerRight))
         {
-            Velocity.X = MathUtility.MoveTowards(Velocity.X, TerminalVelocity, Acceleration);
+            Velocity.X = MathUtility.MoveTowards(Velocity.X, playerOptions.TerminalVelocity, playerOptions.Acceleration);
             FacingRight = true;
         }
         else 
         {
-            Velocity.X = MathUtility.MoveTowards(Velocity.X, 0, Acceleration);
+            Velocity.X = MathUtility.MoveTowards(Velocity.X, 0, playerOptions.Acceleration);
         }
 
         if (IsOnFloor && (InputManager.IsKeyPressed(controlBindings.KeyboardJump) || InputManager.IsGamePadPressed(controlBindings.ControllerJump)))
         {
-            Velocity.Y = -JumpVelocity;
+            Velocity.Y = -playerOptions.JumpVelocity;
             IsOnFloor = false;
         }
 
         if (!IsOnFloor && _jump.Count > 0 && (InputManager.IsKeyPressed(controlBindings.KeyboardJump) || InputManager.IsGamePadPressed(controlBindings.ControllerJump)))
         {
-            Velocity.Y = -JumpVelocity;
+            Velocity.Y = -playerOptions.JumpVelocity;
             _jump.Count--;
         }
 
         if (!IsOnFloor)
         {
-            Velocity.Y = MathUtility.MoveTowards(Velocity.Y, TerminalVelocity, 0.8f);
+            Velocity.Y = MathUtility.MoveTowards(Velocity.Y, playerOptions.TerminalVelocity, 0.8f);
         }
 
         Position += Velocity;

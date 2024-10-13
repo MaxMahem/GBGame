@@ -1,6 +1,5 @@
 using System;
 using GBGame.Entities;
-using GBGame.States;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using MonoGayme.Components;
@@ -20,7 +19,7 @@ public class Bomb(Game windowData, Player player) : Item(windowData)
 
     public override void LoadContent()
     {
-        InventorySprite = WindowData.Content.Load<Texture2D>("Sprites/UI/Bomb");
+        InventorySprite = windowData.Content.Load<Texture2D>("Sprites/UI/Bomb");
 
         Name = "Bomb";
         Description = $"{BombCount} bombs left.";

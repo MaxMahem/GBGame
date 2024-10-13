@@ -1,16 +1,13 @@
-﻿using System;
-using System.Threading;
-using Autofac;
+﻿using Autofac;
+using Autofac.Features.Indexed;
 using Autofac.Features.ResolveAnything;
-using GBGame.Components;
-using GBGame.Entities;
 using GBGame.Skills;
 using GBGame.States;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
-using Microsoft.Xna.Framework.Input;
 using MonoGayme.States;
 using MonoGayme.Utilities;
+using System.Reflection;
 
 namespace GBGame;
 
@@ -21,10 +18,7 @@ public class GameWindow : Game
     readonly Renderer renderer;
     readonly SpriteBatch spriteBatch = null!;
 
-    readonly StateContext context;
-
-    public InGame InGame { get; }
-    public ControlCentre ControlCentre { get; }
+    public GBStateContext State { get; }
 
     readonly WindowOptions windowOptions;
     readonly WindowSizeManager windowSizeManager;
@@ -42,9 +36,8 @@ public class GameWindow : Game
 
         var builder = new ContainerBuilder();
         builder.RegisterInstance(this).AsSelf().As<Game>();
-        builder.RegisterSource(new AnyConcreteTypeNotAlreadyRegisteredSource());
 
-        this.gameScope = builder.Build().BeginLifetimeScope();
+        this.gameScope = RegisterTypes(builder).Build().BeginLifetimeScope();
 
         this.windowOptions = this.gameScope.Resolve<WindowOptions>();
         this.windowSizeManager = this.gameScope.Resolve<WindowSizeManager>();
@@ -55,21 +48,38 @@ public class GameWindow : Game
         
         this.controlBindings = this.gameScope.Resolve<ControlBindings>();
 
-        this.context = this.gameScope.Resolve<StateContext>();
-        this.InGame = this.gameScope.Resolve<InGame>();
-        this.ControlCentre = this.gameScope.Resolve<ControlCentre>();
+        this.State = this.gameScope.Resolve<GBStateContext>();
+    }
+
+    static ContainerBuilder RegisterTypes(ContainerBuilder builder)
+    {
+        builder.RegisterType<GraphicsDeviceManager>().SingleInstance();
+
+        builder.RegisterAssemblyTypes(Assembly.GetExecutingAssembly())
+               .Except<GameWindow>().SingleInstance();
+
+        builder.RegisterType<MultiplyXP>().As<Skill>().SingleInstance();
+        builder.RegisterType<DoubleJump>().As<Skill>().SingleInstance();
+        builder.RegisterType<MoreHP>().As<Skill>().SingleInstance();
+
+        builder.RegisterType<InGameState>().As<State>()
+               .Keyed<State>(nameof(InGameState)).SingleInstance();
+        builder.RegisterType<ControlCentreState>().As<State>()
+               .Keyed<State>(nameof(ControlCentreState)).SingleInstance();
+
+        return builder;
     }
 
     readonly ILifetimeScope gameScope;
 
-    protected override void LoadContent() => this.context.SwitchState(this.InGame);
+    protected override void LoadContent() => this.State.SwitchState(nameof(InGameState));
 
     protected override void Update(GameTime gameTime)
     {
         if (InputManager.IsKeyPressed(this.controlBindings.FullScreen)) { this.windowSizeManager.ToggleFullScreen(); }
 
         MousePosition = this.renderer.GetVirtualMousePosition();
-        this.context.Update(gameTime);
+        this.State.Update(gameTime);
 
         base.Update(gameTime);
     }
@@ -79,7 +89,7 @@ public class GameWindow : Game
         InputManager.GetState();
         
         this.renderer.SetRenderer();
-        this.context.Draw(gameTime, this.spriteBatch);
+        this.State.Draw(gameTime, this.spriteBatch);
 
         this.renderer.DrawRenderer(this.spriteBatch);
 
@@ -87,46 +97,7 @@ public class GameWindow : Game
     }
 }
 
-public class WindowSizeManager(GraphicsDeviceManager graphicsDeviceManager)
-{ 
-    Point sizeBeforeResize;
-    bool isFullScreen = false;
-
-    public void ToggleFullScreen()
-    {
-        if (this.isFullScreen) { graphicsDeviceManager.SetWindowSize(this.sizeBeforeResize.X, this.sizeBeforeResize.Y); }
-        else {
-            this.sizeBeforeResize = graphicsDeviceManager.GraphicsDevice.Viewport.Bounds.Size;
-
-            graphicsDeviceManager.SetWindowSize(
-                GraphicsAdapter.DefaultAdapter.CurrentDisplayMode.Width,
-                GraphicsAdapter.DefaultAdapter.CurrentDisplayMode.Height
-            );
-        }
-
-        this.isFullScreen = !this.isFullScreen;
-        graphicsDeviceManager.ToggleFullScreen();
-    }
-
-    public void SetWindowSize(Point size) => graphicsDeviceManager.SetWindowSize(size.X, size.Y);
-}
-
-public class WindowOptions
+public class GBStateContext(IIndex<string, State> states) : StateContext
 {
-    public Rectangle RenderBounds { get; set; } = new(0, 0, 160, 144);
-
-    public Point VisualWindowSizeMultiplier { get; set; } = new(3, 3);
-
-    public Point ScaledWindowSize => RenderBounds.Size * VisualWindowSizeMultiplier;
-}
-
-public class InGameOptions
-{
-    public int XPMultiplier { get; set; } = 1;
-
-    public Point FieldSize { get; set; } = new(288, 144);
-
-    public int GroundTileRows { get; set; } = 2;
-
-    public Point TileSize { get; set; } = new(8, 8);
+    public void SwitchState(string stateName) => SwitchState(states[stateName]);
 }

@@ -1,7 +1,6 @@
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework;
 using MonoGayme.States;
-using System.Collections.Generic;
 using System;
 using MonoGayme.Components;
 using GBGame.Entities;
@@ -13,17 +12,22 @@ using GBGame.Entities.Enemies;
 using MonoGayme.Controllers;
 using MonoGayme.Components.Colliders;
 using MonoGayme.Entities;
-using System.Linq;
-using System.Collections.Immutable;
-using System.IO;
+using System.Collections.Generic;
+using System.Reactive.Linq;
 
 namespace GBGame.States;
 
-public class InGame(GameWindow windowData) : State(windowData)
+public class InGameState(GameWindow windowData) : State(windowData)
 {
     public required ControlBindings ControlBindings { private get; init; }
     public required InGameOptions InGameOptions {  private get; init; }
     public required WindowOptions WindowOptions { private get; init; }
+
+    public required CameraGB CameraGB { get; init; }
+
+    public required Player Player { get; init; }
+
+    public required ControlCentre ControlCentre { private get; init; }
 
     public int ScoreMultiplier = 1;
 
@@ -32,17 +36,12 @@ public class InGame(GameWindow windowData) : State(windowData)
     const int BatSpawnerHeight = -8;
     const int BatSpawnerWidth = 40;
 
-    ImmutableArray<GridManager.GroundTile> groundTiles = [];
+    private readonly Color BackDrop = new(232, 240, 223);
 
-    private readonly Color BackDrop = new Color(232, 240, 223);
-
-    private Camera2D _camera = new(Vector2.Zero);
-    private float _cameraOffset = 40;
-
-    public EntityController Controller = new();
+    public EntityController Controller { get; } = new();
     private EntityController _enemyController = new();
 
-    private Inventory _inventory = new Inventory();
+    private Inventory _inventory = new();
 
     public required Pause Pause { private get; init; }
 
@@ -61,10 +60,6 @@ public class InGame(GameWindow windowData) : State(windowData)
     private bool _striking = false;
     private RectCollider _strikeCollider = new();
 
-    private Player _player = null!;
-    private RectCollider _playerCollider = null!;
-    private Jump _playerJump = null!;
-
     private readonly Color _levelColour = new(176, 192, 160);
     private readonly Color _xpColour = new(96, 112, 80);
 
@@ -77,11 +72,6 @@ public class InGame(GameWindow windowData) : State(windowData)
     private readonly float _maxDecrease = 3f;
     private bool _canTry = false;
     private bool _canSpawn = false;
-
-    private RectCollider _centreCollider = null!;
-
-    private readonly int _baseXP = 14;
-    private int _toLevelUp;
 
     private void ShakeCamera(GameTime time)
     { 
@@ -129,7 +119,7 @@ public class InGame(GameWindow windowData) : State(windowData)
         if (Random.Shared.Next(0, 3) == 1)
         {
             ProjectileBat pbat = new ProjectileBat(WindowData, position); 
-            pbat.LockOn(_player);
+            pbat.LockOn(Player);
 
             _enemyController.AddEntity(pbat);
             
@@ -137,65 +127,29 @@ public class InGame(GameWindow windowData) : State(windowData)
         }
 
         NormalBat bat = new NormalBat(WindowData, position); 
-        bat.LockOn(_player);
+        bat.LockOn(Player);
 
         _enemyController.AddEntity(bat);
 
-    }
-
-    private void CalculateXP(Entity entity)
-    { 
-        XPDropper? dropper = entity.Components.GetComponent<XPDropper>();
-        if (dropper is null) return;
-
-        GameWindow window = (GameWindow)WindowData;
-        _player.XP += dropper.XP * InGameOptions.XPMultiplier;
-        if (_player.XP >= _toLevelUp)
-        {
-            _player.Level++;
-
-            if (_player.XP - _toLevelUp > 0)
-                _player.XP -= _toLevelUp;
-            else
-                _player.XP = 0;
-
-            // Double XP every level
-            _toLevelUp *= 2;
-
-            window.ControlCentre.SkillPoints++;
-            window.ControlCentre.ChooseSkills();
-        }
     }
 
     public required GridManager GridManager { private get; init; }
 
     public override void LoadContent()
     {
-        _toLevelUp = _baseXP;
-
         _strikeCollider.Bounds = new Rectangle();
 
-        GameWindow window = (GameWindow)WindowData;
-
-        groundTiles = GridManager.GenerateTiles();
-
-        _player = new Player(WindowData, ControlBindings, _camera);
-        this._player.Position.Y = GridManager.GroundLine;
-        Controller.AddEntity(_player);
-
-        window.ControlCentre.LoadContent();
-        _centreCollider = window.ControlCentre.Components.GetComponent<RectCollider>()!;
-
-        _playerCollider = _player.Components.GetComponent<RectCollider>()!;
-        _playerJump = _player.Components.GetComponent<Jump>()!;
+        Player.Position.Y = GridManager.GroundLine;
+        Controller.AddEntity(Player);
+        Controller.AddEntity(ControlCentre);
 
         _sheet = new AnimatedSpriteSheet(WindowData.Content.Load<Texture2D>("Sprites/SpriteSheets/Strike"), new Vector2(6, 1), 0.02f);
         _sheet.OnSheetFinished = () => _striking = false;
         
         _inventory.LoadContent(WindowData);
-        _inventory.AddItem(new Sword(WindowData, _sheet, _player));
+        _inventory.AddItem(new Sword(WindowData, _sheet, Player));
 
-        Bomb = new Bomb(WindowData, _player);
+        Bomb = new Bomb(WindowData, Player);
         _inventory.AddItem(Bomb);
 
         Bomb.Sheet.OnSheetFinished = () => { 
@@ -213,9 +167,9 @@ public class InGame(GameWindow windowData) : State(windowData)
             RectCollider? playerHitter = entity.Components.GetComponent<RectCollider>("PlayerHitter");
             if (playerHitter is not null)
             {
-                if (_playerCollider.Collides(playerHitter))
+                if (Player.Components.GetComponent<RectCollider>()!.Collides(playerHitter))
                 {
-                    _player.ApplyKnockBack(playerHitter);
+                    Player.ApplyKnockBack(playerHitter);
                     StartShake(1, 2);
                 }
             }
@@ -245,7 +199,7 @@ public class InGame(GameWindow windowData) : State(windowData)
                 health.HealthPoints--;
                 if (health.HealthPoints <= 0) 
                 { 
-                    CalculateXP(entity);
+                    Player.CalculateXP(entity);
                     _enemyController.QueueRemove(entity);
                 }
 
@@ -254,7 +208,7 @@ public class InGame(GameWindow windowData) : State(windowData)
 
             if (Bomb.Exploded && rect.Collides(Bomb.KillRadius))
             {
-                CalculateXP(entity);
+                Player.CalculateXP(entity);
                 _enemyController.QueueRemove(entity);
 
                 return;
@@ -266,7 +220,7 @@ public class InGame(GameWindow windowData) : State(windowData)
             if (_canTry && Random.Shared.Next(0, 7) == 1)
                 _canSpawn = true;
 
-            int minPosition = (int)(_player.Position.X - BatSpawnerWidth);
+            int minPosition = (int)(Player.Position.X - BatSpawnerWidth);
             int width = minPosition + (BatSpawnerWidth * 2);
             Vector2 batPosition = new Vector2(Random.Shared.Next(minPosition, width), BatSpawnerHeight);
 
@@ -275,13 +229,13 @@ public class InGame(GameWindow windowData) : State(windowData)
             // 1/4 chance to spawn two bats with one on the opposite side
             if (Random.Shared.Next(0, 4) == 1)
             {
-                Vector2 secondBatPosition = batPosition with { X = 2 * _player.Position.X - batPosition. X }; 
+                Vector2 secondBatPosition = batPosition with { X = 2 * Player.Position.X - batPosition. X }; 
                 AddBat(secondBatPosition);
 
                 // 1/5 chance to spawn 3 bats
                 if (_canSpawn && Random.Shared.Next(0, 5) == 1)
                 {
-                    AddBat(secondBatPosition with { X = 2 * _player.Position.X - secondBatPosition.X });
+                    AddBat(secondBatPosition with { X = 2 * Player.Position.X - secondBatPosition.X });
                 }
             }
         };
@@ -296,7 +250,7 @@ public class InGame(GameWindow windowData) : State(windowData)
             }
         };
 
-        _shapes = new Shapes(window.GraphicsDevice);
+        _shapes = new Shapes(windowData.GraphicsDevice);
     }
 
     public override void Update(GameTime time)
@@ -307,9 +261,6 @@ public class InGame(GameWindow windowData) : State(windowData)
             return;
         }
 
-        if (!windowData.ControlCentre.Interacting && (InputManager.IsGamePadPressed(Buttons.Start) || InputManager.IsKeyPressed(Keys.Escape)))
-            Pause.Paused = !Pause.Paused;
-
         if (Pause.Paused)
         {
             Pause.Update();
@@ -317,34 +268,28 @@ public class InGame(GameWindow windowData) : State(windowData)
         }
 
         // idek
-        windowData.ControlCentre.CanInteract = _centreCollider.Collides(_playerCollider);
-        windowData.ControlCentre.Update(time);
-
-        if (windowData.ControlCentre.Interacting) { return; }
+        ControlCentre.Colliding = ControlCentre.Collider.Collides(Player.Components.GetComponent<RectCollider>()!);
+        ControlCentre.Update(time);
 
         // Update controllers.
-        Controller.UpdateEntities(WindowData.GraphicsDevice, time);
-        _enemyController.UpdateEntities(WindowData.GraphicsDevice, time);
+        Controller.UpdateEntities(windowData.GraphicsDevice, time);
+        _enemyController.UpdateEntities(windowData.GraphicsDevice, time);
 
         // Hardcoded ground checking (we don't need anything more complicated.)
-        if (_player.Position.Y > GridManager.GroundLine) 
+        if (Player.Position.Y > GridManager.GroundLine) 
         {
-            _player.Velocity.Y = 0;
-            _player.Position.Y = GridManager.GroundLine;
+            Player.Velocity.Y = 0;
+            Player.Position.Y = GridManager.GroundLine;
 
-            _playerJump.Count = _playerJump.BaseCount;
-
-            _player.IsOnFloor = true;
+            Player.Components.GetComponent<Jump>()?.ResetCount();
+            Player.IsOnFloor = true;
         }
 
-        if (_player.Position.Y < GridManager.GroundLine && _player.IsOnFloor)
-        {
-            _player.IsOnFloor = false;
-        }
+        if (Player.Position.Y < GridManager.GroundLine && Player.IsOnFloor) { Player.IsOnFloor = false; }
 
-        // Keep the camera position between the game sizes, so the _player doesn't see outside the map.
-        _camera.X = Math.Clamp(MathF.Floor(_player.Position.X - _cameraOffset + _shakeOffset.X), 0, WindowOptions.RenderBounds.Width - InGameOptions.FieldSize.Y);
-        _camera.Y = _shakeOffset.Y;
+        // Keep the camera position between the game sizes, so the Player doesn't see outside the map.
+        CameraGB.X = Math.Clamp(MathF.Floor(Player.Position.X - CameraGB.Offset + _shakeOffset.X), 0, WindowOptions.RenderBounds.Width - InGameOptions.FieldSize.Y);
+        CameraGB.Y = _shakeOffset.Y;
 
         if (!SkipFrame){ HandleInventoryInput(); }
 
@@ -361,12 +306,12 @@ public class InGame(GameWindow windowData) : State(windowData)
     {
         WindowData.GraphicsDevice.Clear(BackDrop);
 
-        batch.Begin(samplerState: SamplerState.PointClamp, transformMatrix: _camera.Transform);
+        batch.Begin(samplerState: SamplerState.PointClamp, transformMatrix: CameraGB.Transform);
         { 
             // Draw the background
-            batch.Draw(_island, _camera.ScreenToWorld(new Vector2(0, -10)), Color.White * 0.4f);
+            batch.Draw(_island, CameraGB.ScreenToWorld(new Vector2(0, -10)), Color.White * 0.4f);
 
-            foreach (GridManager.GroundTile tile in this.groundTiles) 
+            foreach (GridManager.GroundTile tile in GridManager.GroundTiles) 
                 batch.Draw(tile.Sprite, tile.Point.ToVector2(), Color.White);
 
             _enemyController.DrawEntities(batch, time);
@@ -375,8 +320,8 @@ public class InGame(GameWindow windowData) : State(windowData)
             if (!_sheet.Finished)
             {
                 Vector2 strikePosition = new Vector2(
-                    _player.FacingRight ? _player.Position.X + 4 : _player.Position.X - 12,
-                    _player.Position.Y - 4
+                    Player.FacingRight ? Player.Position.X + 4 : Player.Position.X - 12,
+                    Player.Position.Y - 4
                 );
 
                 _strikeCollider.Bounds.X = (int)strikePosition.X + 2;
@@ -386,88 +331,72 @@ public class InGame(GameWindow windowData) : State(windowData)
 
                 _striking = true;
 
-                _sheet.Draw(batch, strikePosition, !_player.FacingRight);
+                _sheet.Draw(batch, strikePosition, !Player.FacingRight);
             }
 
             if(!Bomb.Sheet.Finished) Bomb.Draw(batch);
 
-            _inventory.Draw(batch, _camera);
+            _inventory.Draw(batch, CameraGB);
 
             // Draw the player XP
-            batch.DrawString(_font, $"{_player.XP} - {_toLevelUp}", _camera.ScreenToWorld(new Vector2(1, 25)), _xpColour);
+            batch.DrawString(_font, $"{Player.XP} - {Player.ToLevelUp}", CameraGB.ScreenToWorld(new Vector2(1, 25)), _xpColour);
 
             // Draw the player level
-            batch.Draw(_starSprite, _camera.ScreenToWorld(new Vector2(0, 34)), Color.White);
-            batch.DrawString(_font, $"{_player.Level}", _camera.ScreenToWorld(new Vector2(10, 33)), _levelColour);
+            batch.Draw(_starSprite, CameraGB.ScreenToWorld(new Vector2(0, 34)), Color.White);
+            batch.DrawString(_font, $"{Player.Level}", CameraGB.ScreenToWorld(new Vector2(10, 33)), _levelColour);
 
-            windowData.ControlCentre.Draw(batch, time);
+            ControlCentre.Draw(batch, time);
 
-            if (Pause.Paused) Pause.Draw(batch, _camera);
+            if (Pause.Paused) Pause.Draw(batch, CameraGB);
         } 
         batch.End();
     }
 }
 
-public class GridManager(GameWindow game, InGameOptions inGameOptions)
+public record class GlobalSpawnRate(TimeSpan InitialRate, TimeSpan MinRate, TimeSpan TickDelta, TimeSpan DeltaRate) : IObservable<TimeSpan>
 {
-    public record struct GroundTile(Texture2D Sprite, Point Point);
+    public IDisposable Subscribe(IObserver<TimeSpan> observer) => Observable.Interval(DeltaRate)
+        .Scan(InitialRate, (rate, _) => rate - TickDelta)
+        .TakeWhile(rate => rate >= MinRate)
+        .Publish().RefCount().Subscribe(observer);
+}
 
-    public int GroundLine { get; } = (int) (inGameOptions.FieldSize.Y - (inGameOptions.TileSize.Y * 2.5));
+abstract record class Spawner<T>(IObservable<TimeSpan> SpawnRate, Point Size) : IObservable<IEnumerable<T>>
+{
+    public abstract IDisposable Subscribe(IObserver<IEnumerable<T>> observer);
 
-    readonly ImmutableArray<Texture2D> groundTextures = game.LoadDirectory<Texture2D>("Sprites/Ground/").ToImmutableArray();
-    readonly ImmutableArray<Texture2D> grassTextures = game.LoadDirectory<Texture2D>("Sprites/Grass/").ToImmutableArray();
+    protected abstract IEnumerable<T> Spawn();
+}
 
-    public ImmutableArray<GroundTile> GenerateTiles()
+/*public record BatSpawner(IObservable<TimeSpan> SpawnRate, Point Size, double PrimaryOdds, double SecondaryOdds, double TeritaryOdds)
+    : Spawner<Point>(SpawnRate, Size)
+{
+    public override IDisposable Subscribe(IObserver<IEnumerable<Point>> observer)
+        => SpawnRate.Select(Observable.Interval)
+                    .Select(_ => Spawn()).Subscribe(observer);
+
+    protected override IEnumerable<Point> Spawn()
     {
-        if (!this.groundTextures.ValidateSize(inGameOptions.TileSize) || !this.grassTextures.ValidateSize(inGameOptions.TileSize)) 
-        { 
-            throw new InvalidOperationException("Invalid Tile Size."); 
+        if (Random.Shared.Next() > PrimaryOdds) {
+
+            // Calculate positions based on player and bat spawner parameters
+            int minPosition = State.playerPosition.X - Size.X;
+            int width = minPosition + (Size.X * 2);
+
+            Point batPosition = new(Random.Shared.Next(minPosition, width), Size.Y);
+
+            yield return batPosition;
+
+            if (Random.Shared.Next() > SecondaryOdds) {
+                Point secondBatPosition = batPosition with { X = 2 * State.PlayerPosition.X - batPosition.X };
+                yield return new(secondBatPosition);
+
+                if (Random.Shared.Next() > TeritaryOdds) {
+                    Point thirdBatPosition = batPosition with { X = 2 * State.PlayerPosition.X - secondBatPosition.X };
+                    yield return new(thirdBatPosition);
+                }
+            }
         }
-
-        var (xCount, yCount) = int.DivRem(inGameOptions.FieldSize.X, inGameOptions.TileSize.X) is { Quotient: int xc, Remainder: 0 }
-                            && int.DivRem(inGameOptions.FieldSize.Y, inGameOptions.TileSize.Y) is { Quotient: int yc, Remainder: 0 }
-                            && yc >= inGameOptions.GroundTileRows ? (xc, int.Min(yc, inGameOptions.GroundTileRows)) 
-                            : throw new InvalidOperationException($"Tiles bounds must divide evenly into game field bounds.");
-
-        Point groundOffset = new(0, inGameOptions.FieldSize.Y - (inGameOptions.TileSize.Y * inGameOptions.GroundTileRows));
-
-        var surfaceTiles = from iteration in Enumerable.Range(0, xCount)
-                           let groundTexture = Random.Shared.Pick(this.groundTextures.AsSpan()[..^1])
-                           let groundX = groundOffset.X + (iteration * inGameOptions.TileSize.X)
-                           select new GroundTile(groundTexture, new(groundX, groundOffset.Y));
-
-        var undergroundTiles = from iterationX in Enumerable.Range(0, xCount)
-                               let undergroundX = groundOffset.X + (iterationX * inGameOptions.TileSize.X)
-                               from iterationY in Enumerable.Range(1, yCount - 1)
-                               let undergroundY = groundOffset.Y + (iterationY * inGameOptions.TileSize.Y)
-                               select new GroundTile(this.groundTextures[^1], new(undergroundX, undergroundY));
-
-        var grassTiles = from iteration in Enumerable.Range(0, Random.Shared.Next(xCount / 2, xCount))
-                         let grassX = Random.Shared.Next(0, xCount) * inGameOptions.TileSize.X
-                         let grassTexture = Random.Shared.Pick(this.grassTextures.AsSpan())
-                         select new GroundTile(grassTexture, new(grassX, groundOffset.Y - inGameOptions.TileSize.Y));
-
-        return [.. surfaceTiles, .. undergroundTiles, .. grassTiles.DistinctBy(tile => tile.Point.X)];
     }
 }
-
-public static class RandomHelper
-{
-    public static T Pick<T>(this Random random, ReadOnlySpan<T> span) => span[random.Next(0, span.Length - 1)];
-}
-
-public static class GameHelper 
-{
-    public static IEnumerable<T> LoadDirectory<T>(this Game game, string subDirectory)
-    {
-        Directory.SetCurrentDirectory(game.Content.RootDirectory);        
-        IEnumerable<T> resources = Directory.EnumerateFiles(subDirectory).Select(path => path[..^4])
-                                            .Select(game.Content.Load<T>);
-        Directory.SetCurrentDirectory("../");
-        return resources;
-    }
-
-    public static bool ValidateSize(this IEnumerable<Texture2D> textures, Point expectedSize) 
-        => !textures.Any(textures => textures.Bounds.Size != expectedSize);
-
-}
+*/

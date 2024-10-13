@@ -7,4 +7,6 @@ public class Jump(int count) : Component
     public int BaseCount { get; set; } = count;
 
     public int Count { get; set; } = count;
+
+    public void ResetCount() => Count = BaseCount;
 }

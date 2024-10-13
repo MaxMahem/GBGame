@@ -24,14 +24,7 @@ public class Sword(Game windowData, AnimatedSpriteSheet sheet, Player player) : 
 
             if (player.IsOnFloor)
             {
-                if (player.FacingRight)
-                {
-                    player.Position.X += 1f;
-                }
-                else
-                {
-                    player.Position.X -= 1f;
-                }
+                player.Position.X = player.Position.X + (player.FacingRight ? 1f : -1f);
             }
         }
     }
